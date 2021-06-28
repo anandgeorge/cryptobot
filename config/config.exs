@@ -12,7 +12,8 @@ import Config
 # Sample configuration:
 #
 	config :logger,
-  		level: :info
+#  		level: :info
+  		level: :debug
   	config :naive,
   		binance_client: BinanceMock
 #       format: "$date $time [$level] $metadata$message\n",

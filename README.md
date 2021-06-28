@@ -79,3 +79,31 @@ iex(5)>
  
 15:01:12.748 [info]  Trade finished, trader will now exit ADAUSDT
 ```
+
+To view all logs use an anonymous function to call both functions simultaneously.
+
+```elixir
+(fn () -> Streamer.start_streaming("XRPUSDT"); Naive.start_trading("XRPUSDT") end).()
+
+17:29:03.254 [info]  Starting new supervision tree to trade on XRPUSDT
+{:ok, #PID<0.345.0>}
+iex(5)> 
+17:29:04.614 [debug] Trade event received XRPUSDT@0.62680000
+ 
+17:29:05.413 [info]  Start traders for XRPUSDT
+ 
+17:29:06.592 [debug] Trade event received XRPUSDT@0.62690000
+ 
+17:29:06.592 [debug] Trade event received XRPUSDT@0.62690000
+ 
+17:29:06.598 [info]  Placing BUY order for XRPUSDT @ 0.62680000, quantity: 50
+ 
+17:29:06.600 [debug] BinanceMock subscribing to TRADE_EVENTS:XRPUSDT
+
+```
+
+To run multiple symbols and multiple traders for each symbol, start streaming for each and then start trading on each. Also start the observer to keep track of the processes.
+
+```elixir
+(fn () -> :observer.start(); Streamer.start_streaming("XRPUSDT"); Naive.start_trading("XRPUSDT"); Streamer.start_streaming("ADAUSDT"); Naive.start_trading("ADAUSDT") end).()
+```
