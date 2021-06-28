@@ -24,7 +24,7 @@ defmodule Naive.Trader do
 
 	def init(%State{symbol: symbol} = state) do
 		symbol = String.upcase(symbol)
-		Logger.info("Initializing new trader for #{symbol}")
+		# Logger.info("Initializing new trader for #{symbol}")
 		# tick_size = fetch_tick_size(symbol)
 		Phoenix.PubSub.subscribe(
 			Streamer.PubSub,
@@ -46,7 +46,7 @@ defmodule Naive.Trader do
 		) do
 		# quantity = "100"
 		quantity = "50"
-		Logger.info("Placing BUY order for #{symbol} @ #{price}, quantity: #{quantity}")
+		# Logger.info("Placing BUY order for #{symbol} @ #{price}, quantity: #{quantity}")
 
 		{:ok, %Binance.OrderResponse{} = order} = 
 			# Binance.order_limit_buy(symbol, quantity, price, "GTC")
@@ -74,9 +74,7 @@ defmodule Naive.Trader do
 		) do
 		sell_price = calculate_sell_price(buy_price, profit_interval, tick_size)
 		
-		Logger.info(
-			"Buy order filled, placing SELL order for " <>
-			"#{symbol} @ #{sell_price}, quantity: #{quantity}"
+		# Logger.info("Buy order filled, placing SELL order for " <> "#{symbol} @ #{sell_price}, quantity: #{quantity}"
 		)
 		{:ok, %Binance.OrderResponse{} = order} = 
 			# Binance.order_limit_sell(symbol, quantity, sell_price, "GTC")
