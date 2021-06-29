@@ -1,6 +1,7 @@
 defmodule Naive.Leader do
 	use GenServer
 	alias Naive.Trader
+	alias Decimal, as: D
 	require Logger
 
 	@binance_client Application.compile_env(:naive, :binance_client)
@@ -32,7 +33,8 @@ defmodule Naive.Leader do
 	def handle_continue(:start_traders, %{symbol: symbol} = state) do
 		settings = fetch_symbol_settings(symbol)
 		trader_state = fresh_trader_state(settings)
-		traders = for _i <- 1..settings.chunks, do: start_new_trader(trader_state)
+		# traders = for _i <- 1..settings.chunks, do: start_new_trader(trader_state)
+		traders = [start_new_trader(trader_state)]
 
 		Logger.info("Start traders for #{symbol}")
 
@@ -43,6 +45,13 @@ defmodule Naive.Leader do
 		GenServer.call(
 			:"#{__MODULE__}-#{trader_state.symbol}",
 			{:update_trader_state, trader_state}
+		)
+	end
+
+	def notify(:rebuy_triggered, trader_state) do
+		GenServer.call(
+			:"#{__MODULE__}-#{trader_state.symbol}",
+			{:rebuy_triggered, trader_state}
 		)
 	end
 
@@ -61,6 +70,32 @@ defmodule Naive.Leader do
 				{:reply, :ok, %{state | :traders =>
 					List.replace_at(traders, index, new_trader_data)
 				}}
+		end
+	end
+
+	def handle_call(
+			{:rebuy_triggered, new_trader_state},
+			{trader_pid, _},
+			%{traders: traders, symbol: symbol, settings: settings} = state
+		) do
+		case Enum.find_index(traders, &(&1.pid == trader_pid)) do
+			nil ->
+				Logger.warn("Rebuy triggered by trader that leader is not aware of")
+				{:reply, :ok, state}
+			index ->
+				old_trader_data = Enum.at(traders, index)
+				new_trader_data = %{old_trader_data | :state => new_trader_state}
+				updated_traders = List.replace_at(traders, index, new_trader_data)
+
+				updated_traders =
+					if settings.chunks == length(traders) do
+						Logger.info("All traders already started for #{symbol}")
+						updated_traders
+					else
+						Logger.info("Starting new trader for #{symbol}")
+						[start_new_trader(fresh_trader_state(settings)) | updated_traders]
+					end
+				{:reply, :ok, %{state | :traders => updated_traders}}
 		end
 	end
 
@@ -109,32 +144,67 @@ defmodule Naive.Leader do
 
 
 	defp fresh_trader_state(settings) do
-		struct(Trader.State, settings)
-	end
-
-	def fetch_symbol_settings(symbol) do
-		tick_size = fetch_tick_size(symbol)
-
 		%{
-			symbol: symbol,
-			# chunks: 1,
-			chunks: 5,
-			# 0.01% for quick testing
-			buy_down_interval: "0.0001",
-			# -0.12% for quick test
-			profit_interval: "-0.0012",
-			tick_size: tick_size
+			struct(Trader.State, settings) |
+			id: :os.system_time(:millisecond),
+			budget: D.div(settings.budget, settings.chunks),
+			rebuy_notified: false
 		}
 	end
 
-	defp fetch_tick_size(symbol) do
-		@binance_client.get_exchange_info()
-		|> elem(1)
-		|> Map.get(:symbols)
-		|> Enum.find(&(&1["symbol"] == symbol))
-		|> Map.get("filters")
-		|> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
-		|> Map.get("tickSize")
+	def fetch_symbol_settings(symbol) do
+		# tick_size = fetch_tick_size(symbol)
+		symbol_filters = fetch_symbol_filters(symbol)
+
+		Map.merge(
+			%{
+				symbol: symbol,
+				# chunks: 1,
+				chunks: 5,
+				budget: 100,
+				# 0.01% for quick testing
+				buy_down_interval: "0.0001",
+				# -0.12% for quick test
+				profit_interval: "-0.0012",
+				rebuy_interval: "0.001",
+				# tick_size: tick_size
+			},
+			symbol_filters
+		)
+	end
+
+#	defp fetch_tick_size(symbol) do
+#		@binance_client.get_exchange_info()
+#		|> elem(1)
+#		|> Map.get(:symbols)
+#		|> Enum.find(&(&1["symbol"] == symbol))
+#		|> Map.get("filters")
+#		|> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
+#		|> Map.get("tickSize")
+#	end
+
+	defp fetch_symbol_filters(symbol) do
+		symbol_filters = 
+			@binance_client.get_exchange_info()
+			|> elem(1)
+			|> Map.get(:symbols)
+			|> Enum.find(&(&1["symbol"] == symbol))
+			|> Map.get("filters")
+
+		tick_size = 
+			symbol_filters
+			|> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
+			|> Map.get("tickSize")
+
+		step_size =
+			symbol_filters
+			|> Enum.find(&(&1["filterType"] == "LOT_SIZE"))
+			|> Map.get("stepSize")
+
+		%{
+			tick_size: tick_size,
+			step_size: step_size
+		}
 	end
 
 	defp start_new_trader(%Trader.State{} = state) do

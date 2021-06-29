@@ -71,7 +71,7 @@ defmodule BinanceMock do
 
     case Enum.member?(subscriptions, symbol) do
       false ->
-        Logger.debug("BinanceMock subscribing to #{stream_name}")
+        # Logger.debug("BinanceMock subscribing to #{stream_name}")
         Phoenix.PubSub.subscribe(
           Streamer.PubSub,
           stream_name
