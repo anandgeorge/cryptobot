@@ -3,6 +3,8 @@ defmodule Naive.Leader do
 	alias Naive.Trader
 	alias Decimal, as: D
 	require Logger
+	alias Naive.Repo
+	alias Naive.Schema.Settings
 
 	@binance_client Application.compile_env(:naive, :binance_client)
 
@@ -55,6 +57,13 @@ defmodule Naive.Leader do
 		)
 	end
 
+	def notify(:settings_updated, settings) do
+		GenServer.call(
+			:"#{__MODULE__}-#{settings.symbol}",
+			{:update_settings, settings}
+		)
+	end
+
 	def handle_call(
 			{:update_trader_state, new_trader_state},
 			{trader_pid, _},
@@ -92,11 +101,26 @@ defmodule Naive.Leader do
 						Logger.info("All traders already started for #{symbol}")
 						updated_traders
 					else
-						Logger.info("Starting new trader for #{symbol}")
-						[start_new_trader(fresh_trader_state(settings)) | updated_traders]
+						if settings.status == "shutdown" do
+							Logger.warn("The leader won't start a new trader on #{symbol} " <>
+								"as symbol is in the 'shutdown' state"
+							)
+							updated_traders
+						else
+							Logger.info("Starting new trader for #{symbol}")
+							[start_new_trader(fresh_trader_state(settings)) | updated_traders]
+						end
 					end
 				{:reply, :ok, %{state | :traders => updated_traders}}
 		end
+	end
+
+	def handle_call(
+		{:update_settings, new_settings},
+		_,
+		state
+	) do
+		{:reply, :ok, %{state | settings: new_settings}}
 	end
 
 	def handle_info(
@@ -111,12 +135,30 @@ defmodule Naive.Leader do
 					"Tried to restart finished #{symbol} " <>
 					"trader that leader is not aware of"
 				)
+				if settings.status == "shutdown" and traders == [] do
+					Naive.stop_trading(state.symbol)
+				end
 				{:noreply, state}
 			index ->
-				new_trader_data = start_new_trader(fresh_trader_state(settings))
-				new_traders = List.replace_at(traders, index, new_trader_data)
-				{:noreply, %{state | traders: new_traders}}
-		end
+				# new_trader_data = start_new_trader(fresh_trader_state(settings))
+				# new_traders = List.replace_at(traders, index, new_trader_data)
+				# {:noreply, %{state | traders: new_traders}}
+				new_traders =
+					if settings.status == "shutdown" do
+						Logger.warn("The leader won't start a new trader on #{symbol} " <>
+						"as symbol is in the 'shutdown' state"
+						)
+
+						if length(traders) == 1 do
+							Naive.stop_trading(state.symbol)
+						end
+						List.delete_at(traders, index)
+					else
+						new_trader_data = start_new_trader(fresh_trader_state(settings))
+						List.replace_at(traders, index, new_trader_data)
+					end
+					{:noreply, %{state | traders: new_traders}}
+			end
 
 	end
 
@@ -155,22 +197,28 @@ defmodule Naive.Leader do
 	def fetch_symbol_settings(symbol) do
 		# tick_size = fetch_tick_size(symbol)
 		symbol_filters = fetch_symbol_filters(symbol)
+		settings = Repo.get_by!(Settings, symbol: symbol)
 
+#		Map.merge(
+#			%{
+#				symbol: symbol,
+#				# chunks: 1,
+#				chunks: 5,
+#				budget: 100,
+#				# 0.01% for quick testing
+#				buy_down_interval: "0.0001",
+#				# -0.12% for quick test
+#				profit_interval: "-0.0012",
+#				rebuy_interval: "0.001",
+#				# tick_size: tick_size
+#			},
+#			symbol_filters
+#		)
 		Map.merge(
-			%{
-				symbol: symbol,
-				# chunks: 1,
-				chunks: 5,
-				budget: 100,
-				# 0.01% for quick testing
-				buy_down_interval: "0.0001",
-				# -0.12% for quick test
-				profit_interval: "-0.0012",
-				rebuy_interval: "0.001",
-				# tick_size: tick_size
-			},
-			symbol_filters
+			symbol_filters,
+			settings |> Map.from_struct()
 		)
+
 	end
 
 #	defp fetch_tick_size(symbol) do
@@ -184,14 +232,14 @@ defmodule Naive.Leader do
 #	end
 
 	defp fetch_symbol_filters(symbol) do
-		symbol_filters = 
+		symbol_filters =
 			@binance_client.get_exchange_info()
 			|> elem(1)
 			|> Map.get(:symbols)
 			|> Enum.find(&(&1["symbol"] == symbol))
 			|> Map.get("filters")
 
-		tick_size = 
+		tick_size =
 			symbol_filters
 			|> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
 			|> Map.get("tickSize")
@@ -208,43 +256,9 @@ defmodule Naive.Leader do
 	end
 
 	defp start_new_trader(%Trader.State{} = state) do
-		{:ok, pid} = 
+		{:ok, pid} =
 			DynamicSupervisor.start_child(:"Naive.DynamicTraderSupervisor-#{state.symbol}", {Naive.Trader, state})
 		ref = Process.monitor(pid)
 		%TraderData{pid: pid, ref: ref, state: state}
 	end
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

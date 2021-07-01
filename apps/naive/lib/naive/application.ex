@@ -7,18 +7,15 @@ defmodule Naive.Application do
 
   def start(_type, _args) do
     children = [
-      {
-        DynamicSupervisor,
-        strategy: :one_for_one,
-        name: Naive.DynamicSymbolSupervisor
-      }
+      {Naive.Repo, []},
+      {Naive.Supervisor, []}
       # Starts a worker by calling: Naive.Worker.start_link(arg)
       # {Naive.Worker, arg}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Naive.Supervisor]
+    opts = [strategy: :one_for_one, name: Naive.Application]
     Supervisor.start_link(children, opts)
   end
 end
